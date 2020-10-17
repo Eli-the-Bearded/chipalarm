@@ -1,0 +1,281 @@
+# This, after the comments, is the actual contents of my
+# ~/.chipalarmrc file as of 16 October 2020. The @table
+# structure _really_ should be moved into a state file,
+# as it is unlikely anyone will ever want to edit it. The
+# $alarm{...} settings are the ones I edit. I tend to aim
+# for a unique minute, so that I can quickly get to a line
+# with, say, "vi .chipalarmrc" then "/31" because typing
+# on the Pocketchip keyboard is very awkward. The alarm
+# times are (silently) picky about format. Use a 24h 
+# format with leading zeros (digit)(digit):(digit)(digit)
+# or it won't work. Color names are from the X11 rgb.txt
+# file.
+#
+# The alarm-ui.png screenshot matches this file. Covid-19
+# WFH has me sleeping in until 8 most days now.
+$alarm{1}            = '10:30';
+$alarm{2}            = '07:20';
+$alarm{3}            = '07:59';
+$alarm{Sunday}       = '09:31';
+$alarm{Monday}       = '06:55';
+$alarm{Tuesday}      = '07:15';
+$alarm{Wednesday}    = '06:59';
+$alarm{Thursday}     = '06:20';
+$alarm{Friday}       = '07:45';
+$alarm{Saturday}     = '09:25';
+$alarm{active}       = 'pink';
+$alarm{inactive}     = 'white';
+$alarm{daycontrol}   = 'lightblue';
+$alarm{buttonwidth}  = '6';
+$alarm{buttonheight} = '3';
+
+@table = (
+           [
+             {
+               'type' => 'day',
+               'label' => 'Sunday',
+               'color' => 'lightblue',
+               'day' => 'Sunday'
+             },
+             {
+               'day' => 'Monday',
+               'type' => 'day',
+               'color' => 'lightblue',
+               'label' => 'Monday'
+             },
+             {
+               'day' => 'Tuesday',
+               'label' => 'Tuesday',
+               'color' => 'lightblue',
+               'type' => 'day'
+             },
+             {
+               'day' => 'Wednesday',
+               'color' => 'lightblue',
+               'type' => 'day',
+               'label' => 'Wednesday'
+             },
+             {
+               'color' => 'lightblue',
+               'label' => 'Thursday',
+               'type' => 'day',
+               'day' => 'Thursday'
+             },
+             {
+               'type' => 'day',
+               'label' => 'Friday',
+               'color' => 'lightblue',
+               'day' => 'Friday'
+             },
+             {
+               'color' => 'lightblue',
+               'label' => 'Saturday',
+               'type' => 'day',
+               'day' => 'Saturday'
+             }
+           ],
+           [
+             {
+               'day' => 'Sunday',
+               'label' => 'Alarm 1
+10:30',
+               'type' => 'alarm',
+               'color' => 'pink'
+             },
+             {
+               'type' => 'alarm',
+               'label' => 'Alarm 1
+10:30',
+               'color' => 'white',
+               'day' => 'Monday'
+             },
+             {
+               'day' => 'Tuesday',
+               'color' => 'white',
+               'label' => 'Alarm 1
+10:30',
+               'type' => 'alarm'
+             },
+             {
+               'label' => 'Alarm 1
+10:30',
+               'color' => 'white',
+               'type' => 'alarm',
+               'day' => 'Wednesday'
+             },
+             {
+               'label' => 'Alarm 1
+10:30',
+               'type' => 'alarm',
+               'color' => 'white',
+               'day' => 'Thursday'
+             },
+             {
+               'type' => 'alarm',
+               'label' => 'Alarm 1
+10:30',
+               'color' => 'white',
+               'day' => 'Friday'
+             },
+             {
+               'day' => 'Saturday',
+               'label' => 'Alarm 1
+10:30',
+               'color' => 'pink',
+               'type' => 'alarm'
+             }
+           ],
+           [
+             {
+               'day' => 'Sunday',
+               'label' => 'Alarm 2
+07:20',
+               'type' => 'alarm',
+               'color' => 'white'
+             },
+             {
+               'day' => 'Monday',
+               'type' => 'alarm',
+               'color' => 'white',
+               'label' => 'Alarm 2
+07:20'
+             },
+             {
+               'day' => 'Tuesday',
+               'label' => 'Alarm 2
+07:20',
+               'type' => 'alarm',
+               'color' => 'pink'
+             },
+             {
+               'label' => 'Alarm 2
+07:20',
+               'type' => 'alarm',
+               'color' => 'white',
+               'day' => 'Wednesday'
+             },
+             {
+               'day' => 'Thursday',
+               'label' => 'Alarm 2
+07:20',
+               'type' => 'alarm',
+               'color' => 'white'
+             },
+             {
+               'day' => 'Friday',
+               'type' => 'alarm',
+               'label' => 'Alarm 2
+07:20',
+               'color' => 'white'
+             },
+             {
+               'day' => 'Saturday',
+               'type' => 'alarm',
+               'label' => 'Alarm 2
+07:20',
+               'color' => 'white'
+             }
+           ],
+           [
+             {
+               'day' => 'Sunday',
+               'color' => 'white',
+               'label' => 'Alarm 3
+07:59',
+               'type' => 'alarm'
+             },
+             {
+               'label' => 'Alarm 3
+07:59',
+               'type' => 'alarm',
+               'color' => 'pink',
+               'day' => 'Monday'
+             },
+             {
+               'day' => 'Tuesday',
+               'label' => 'Alarm 3
+07:59',
+               'color' => 'white',
+               'type' => 'alarm'
+             },
+             {
+               'day' => 'Wednesday',
+               'color' => 'pink',
+               'type' => 'alarm',
+               'label' => 'Alarm 3
+07:59'
+             },
+             {
+               'day' => 'Thursday',
+               'color' => 'pink',
+               'label' => 'Alarm 3
+07:59',
+               'type' => 'alarm'
+             },
+             {
+               'type' => 'alarm',
+               'color' => 'pink',
+               'label' => 'Alarm 3
+07:59',
+               'day' => 'Friday'
+             },
+             {
+               'day' => 'Saturday',
+               'type' => 'alarm',
+               'label' => 'Alarm 3
+07:59',
+               'color' => 'white'
+             }
+           ],
+           [
+             {
+               'color' => 'white',
+               'label' => '09:31 on
+Sunday',
+               'type' => 'alarm',
+               'day' => 'Sunday'
+             },
+             {
+               'day' => 'Monday',
+               'color' => 'white',
+               'type' => 'alarm',
+               'label' => '06:55 on
+Monday'
+             },
+             {
+               'label' => '07:15 on
+Tuesday',
+               'type' => 'alarm',
+               'color' => 'white',
+               'day' => 'Tuesday'
+             },
+             {
+               'day' => 'Wednesday',
+               'label' => '06:59 on
+Wednesday',
+               'type' => 'alarm',
+               'color' => 'white'
+             },
+             {
+               'day' => 'Thursday',
+               'type' => 'alarm',
+               'label' => '06:20 on
+Thursday',
+               'color' => 'white'
+             },
+             {
+               'day' => 'Friday',
+               'color' => 'white',
+               'type' => 'alarm',
+               'label' => '07:45 on
+Friday'
+             },
+             {
+               'day' => 'Saturday',
+               'color' => 'white',
+               'label' => '09:25 on
+Saturday',
+               'type' => 'alarm'
+             }
+           ]
+         );

@@ -1,0 +1,583 @@
+#!/usr/bin/perl -w
+# An alarm clock program to run on a "pocketchip" computer
+# https://en.wikipedia.org/wiki/CHIP_(computer)
+# Prior to creating this, I used an old "feature" phone an an
+# alarm. It let me quickly turn on or off three different alarm
+# settings. I liked that, but wanted a way to set a week of
+# those at once and to have an occasional override.
+#
+# This reads (or creates if it doesn't find one) a .chipalarmrc
+# file with three standard alarm times and one per-day-of-week
+# alarm time. While running, every thing is a button. Click an
+# alarm to toggle that, click the day of week to clear all
+# alarms on that day. Push one button over and over enough and
+# the program quits.
+
+# handy Tk reference:
+# http://docstore.mik.ua/orelly/perl3/tk/index.htm
+use Tk;
+use Tk::Widget;
+use Tk::Button;
+use Tk::X11Font;
+use Tk::Table;
+use Data::Dumper;	# our method to save state
+use strict;
+
+# config section
+# TODO: seperate config (in a chipalarmrc) from state (probably
+# in a chipalarmstate)
+#   config would be %alarm, which has times of alarms and colors
+#   state  would be @table, which holds "is this alarm on or
+#                           off?" and some other boring stuff
+my $statefile = $ENV{"HOME"} . '/.chipalarmrc';
+
+# program to run that sounds an alarm
+# this program handles deciding when to end the alarm on it's own
+# we are "fire and forget" here
+my $alarmtool = '/home/chip/bin/gpio-sound';
+
+my @moy = qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec);
+my @dow = qw(sunday monday tuesday wednesday thursday friday
+             saturday);
+my %dow;
+for my $index (0..6) {
+   my $name            = $dow[$index];
+   $dow{$index}        = $name;		# eg 3 = wednesday
+   $dow{$name}         = $index;	# eg wednesday = 3
+   $dow{uc $name}      = $index;	# eg Wednesday = 3
+   $dow{ucfirst $name} = $index;	# eg WEDNESDAY = 3
+}
+
+my $lastpress = '';
+my $lastcount = 0;
+my $lastsave = 0;
+my $needsave = undef;
+
+my $mw = MainWindow->new;
+my $butf;
+
+# set in %alarm eventually
+# home
+# smallest font I found in a causal search
+# $butf = $mw->X11Font(
+#   '-b&h-lucida-medium-r-normal-sans-10-100-75-75-p-58' .
+#   '-iso8859-1'); # font names are long in X11
+# office
+$butf = $mw->X11Font(
+    '-misc-fixed-medium-r-normal--10-100-75-75-c-60-iso8859-1');
+
+
+my $t  = $mw->Table(-columns => 7, -rows => 5, 
+		-fixedrows => 1, -scrollbars => 'c');
+$t->pack(-expand=> 1, -fill => 'both');
+ 
+my $row; my $col;
+my @table;	# most data about buttons
+my @btable;	# just for X11 button objects
+my %alarm;
+
+if(!readdata()) {
+
+  # no data read in, let's create some
+  boring_init();
+
+} # init @table and %alarm from file or boring
+
+# Use HUP and USR1 to re-read %alarm (but not @table)
+$SIG{HUP} = 'main::rereaddata';
+$SIG{USR1} = 'main::rereaddata';
+
+# USR2 calls writedata() right now
+$SIG{USR2} = 'main::forcewrite';
+
+# create button table
+for $row (0..4) {
+  for $col (0..6) {
+
+    my $label = $table[$row][$col]{label};
+    my $color = $table[$row][$col]{color};
+
+    my $l = $t->Button(-text => $label,
+		       -font => $butf,
+		       -width => $alarm{buttonwidth},
+		       -height => $alarm{buttonheight},
+		       # on a touchscreen, with no pointer,
+		       # it does not make sense to distinguish
+		       # activebackground from regular.
+		       -background => $color,
+		       -activebackground => $color,
+		       -command => [\&pressed, $t, $row, $col]);
+
+    $t->put($row, $col, $l);
+    $btable[$row][$col] = $l;
+
+  }
+}
+
+writedata();
+$t->focus;
+$t->update;
+
+# time is measured in milliseconds
+my $alarm;
+my $startcheck;
+my $c_sec = (localtime())[0];
+if($c_sec != 1) {
+  # not at 01 seconds, so wait until we are, then start per
+  # minute repeat
+  my $delay = ((61 - $c_sec)%60);
+  print "startcheck in $delay (for sec $c_sec)\n";
+  $startcheck = $mw->after( $delay * 1000, 
+  	sub {
+	      $alarm = $mw->repeat( 60 * 1000, \&everyminute );
+	    }
+        );
+} else {
+   # well, it is a good time to start a per-minute repeat now.
+   $alarm = $mw->repeat( 60 * 1000, \&everyminute );
+}
+
+# call immediately, too, since time on buttons is nice to
+# have sooner.
+everyminute();
+
+MainLoop;
+
+# pretty print the %alarm hash; this is the one users will edit.
+sub dumpalarm {
+my @order = ();
+my $len = 1;
+my %seen;
+my $pad = '';
+my $ret = '';
+
+push(@order, 1, 2, 3);
+for my $d (0..6) {
+my $Day = ucfirst($dow[$d]);
+push(@order, $Day);
+}
+push(@order, qw( active inactive daycontrol
+   buttonwidth buttonheight ));
+
+for (@order) {
+$seen{$_} = 1;
+}
+for (sort { $a cmp $b } (keys %alarm)) {
+if(length($_) > $len) { $len = length($_); }
+if(!defined($seen{$_})) {
+$seen{$_} = 0;
+push(@order, $_);
+}
+}
+
+for (@order) {
+    $pad = ' ' x ($len - length($_));
+    $ret .= '$alarm' . "{$_} $pad= ";
+    if($alarm{$_} =~ /'/) {
+      $ret .= "q<$alarm{$_}>;";
+    } else {
+      $ret .= qq<'$alarm{$_}';>;
+    }
+    if($seen{$_}) {
+      $ret .= "\n";
+    } else {
+      $ret .= " # non-standard\n";
+    }
+  }
+  
+  $ret .= "\n";
+  $ret;
+} # end &dumpalarm 
+
+sub writedata {
+  my $out = '';
+
+  # %alarm gets a friendly, pretty dump
+  $out  = dumpalarm();
+
+  # @table gets a quick and easy dump
+  $out .= Data::Dumper->Dump([\@table],
+                             ['*table']);
+
+  if(-f $statefile) {
+    rename $statefile, "$statefile.last";
+  }
+  if(open(STATE, '>', $statefile)) {
+    print STATE $out;
+    close STATE;
+    $lastsave = time();
+    return 1;
+  }
+  warn "$0: cannot use statefile: $!\n";
+  return undef;
+} # end &writedata 
+
+sub readdata {
+  my $option = shift;
+  my @ignored;
+  my %colortmp;
+  my $redraw;
+
+
+  if(-f $statefile) {
+    my $in = '';
+
+    if(open(STATE, '<', $statefile)) {
+
+      while(<STATE>) { $in .= $_; }
+      close STATE;
+
+      # original statefile style: %alarm = { 'Sunday' => ...
+      # new      statefile style: $alarm{Sunday} = ...
+      if($in !~ /^\s*(%alarm|\$alarm{\w+})\s*=/m) {
+        return undef;
+      }
+
+      # Data::Dumper original style
+      # @table = ( ... );
+      if($in !~ /^\s*\@table\s*=/m) {
+        return undef;
+      }
+
+      if(defined($option) and ($option eq 'alarm')) {
+        # Called from signal handler. Ignore the table in the
+	# statefile.
+	$in =~ s/^\s*\@table\s*/\@ignored/gm;
+
+	# save old colors to know if we need to switch them
+	$colortmp{active}     = "$alarm{active}";
+	$colortmp{inactive}   = "$alarm{inactive}";
+	$colortmp{daycontrol} = "$alarm{daycontrol}";
+
+	$colortmp{quick} = "$alarm{active}-::-" .
+	                   "$alarm{inactive}";
+      }
+
+      $_ = eval qq{ $in };
+      if($@) {
+        die "$0: cannot parse $statefile\n$@\n";
+      }
+
+      $colortmp{new} = "$alarm{active}-::-" .
+		       "$alarm{inactive}";
+
+      if(defined($colortmp{quick}) and
+         $colortmp{quick} ne $colortmp{new}) {
+
+	# at least one color for regular buttons changed
+        $colortmp{replace} = 1;
+      } else {
+        $colortmp{replace} = undef;
+      }
+
+      # now update colors and labels, since %alarm might
+      # have changed
+      my $row;
+      my $col;
+      my $l;
+
+      if(defined($colortmp{daycontrol}) and 
+         ($colortmp{daycontrol} ne $alarm{daycontrol})) {
+
+	# color for day buttons changed
+        $row = 0;
+        for $col (0..6) {
+	  $table[$row][$col]{color} = $alarm{daycontrol};
+	}
+      }
+
+
+      for $row (1..3) {
+        for $col (0..6) {
+
+          my $Day = ucfirst($dow[$col]);
+          my $at = $alarm{$row};
+          my $alarm = "Alarm $row\n$at";
+
+          $table[$row][$col]{label} = $alarm;
+
+	  if($colortmp{replace}) {
+	    if($colortmp{inactive} eq $table[$row][$col]{color}) {
+	      $table[$row][$col]{color} = $alarm{inactive};
+	    }
+	    elsif($colortmp{active} eq $table[$row][$col]{color}) {
+	      $table[$row][$col]{color} = $alarm{active};
+	    }
+          }
+
+	}
+      } # update regular alarms
+
+      $row = 4;
+      for $col (0..6) {
+	my $Day = ucfirst($dow[$col]);
+	my $at = $alarm{$Day};
+	my $alarm = "$at on\n$Day";
+
+	$table[$row][$col]{label} = $alarm;
+
+	if($colortmp{replace}) {
+	  if($colortmp{inactive} eq $table[$row][$col]{color}) {
+	    $table[$row][$col]{color} = $alarm{inactive};
+	  }
+	  elsif($colortmp{active} eq $table[$row][$col]{color}) {
+	    $table[$row][$col]{color} = $alarm{active};
+	  }
+	}
+      } # update custom alarms
+
+      # now for the actual buttons
+      for $row (0..4) {
+        for $col (0..6) {
+	  my $l = $btable[$row][$col];
+	  # use for code line length control
+	  my $color = $table[$row][$col]{color};
+
+	  if(!defined($l)) { next; }
+	  $l->configure(-text => $table[$row][$col]{label},
+			-background => $color,
+			-activebackground => $color);
+	  
+	  $redraw = 1;
+	}
+      } # update actual buttons
+
+      if($redraw) {
+	$t->update;
+      }
+
+      # successful!
+      return 1;
+
+    } # if open state file
+  } # if have state file
+
+  # no statefile
+  return undef;
+} # end &readdata 
+
+sub rereaddata {
+  my $signame = (shift or '(unknown)');
+  print "Signal $signame; re-reading %alarm.\n";
+  readdata('alarm');
+  # @table probably needs resaving
+  $needsave = 1;
+} # end &rereaddata 
+
+sub forcewrite {
+  my $signame = (shift or '(unknown)');
+  print "Signal $signame; force saving.\n";
+  if(writedata()) {
+    $needsave = undef;
+  } else {
+    print "Data save failed.\n";
+  }
+} # end &forcewrite 
+
+sub pressed {
+  my ($t, $row, $col) = @_;
+
+  my $label = $table[$row][$col]{label};
+  my $day   = $table[$row][$col]{day};
+  my $type  = $table[$row][$col]{type};
+  my $color = $table[$row][$col]{color};
+
+  $needsave = 1;
+
+  if($row == 0) { 
+    # multi cell operation
+
+    for my $r (1..4) {
+      my $l = $btable[$r][$col];
+
+      $l->configure(-text => $table[$r][$col]{label},
+		    -background => $alarm{inactive},
+		    -activebackground => $alarm{inactive});
+
+      $table[$r][$col]{color} = $alarm{inactive};
+    }
+
+    # end multi cell
+  } else {
+    # single cell operation
+
+    if($color eq $alarm{active}) {
+      $color = $alarm{inactive};
+    } elsif ($color eq $alarm{inactive}) {
+      $color = $alarm{active};
+    }
+
+    $table[$row][$col]{color} = $color;
+    my $l = $btable[$row][$col];
+    $l->configure(-text => $label,
+		  -background => $color,
+		  -activebackground => $color);
+
+  } # single cell operation
+
+  my $thispress = "$row.$col";
+
+  if($lastpress eq $thispress) {
+
+    $lastcount ++;
+    if($lastcount > 6) {
+      # save state
+      writedata();
+
+      print "Done!\n";
+      exit 0;
+    }
+
+  } else {
+    $lastpress = $thispress;
+    $lastcount = 0;
+
+    if($type eq 'day') {
+      print "Pressed $type ($day)\n";
+    } else {
+      print "Pressed $type $row for $day\n";
+    }
+
+  }
+
+  $t->update;
+} # end &pressed 
+
+sub everyminute {
+  #  0    1    2     3     4    5     6     7     8
+  # ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst)
+  my @time = localtime();
+
+  my $hhmm = sprintf('%02d:%02d', $time[2], $time[1]);
+  my $hhmmss = sprintf('%s:%02d', $hhmm, $time[0]);
+  my $dow = $time[6];
+  my $Day = ucfirst($dow[$time[6]]);
+
+  if($needsave) {
+    if(writedata()) {
+      $needsave = undef;
+      print "Autosaved at $Day $hhmmss\n";
+    }
+  }
+  
+  if($table[4][$dow]{color} eq $alarm{active}
+     and $alarm{$Day} eq $hhmm ) {
+
+    trigger("ALARM for $Day -- $hhmmss");
+
+  } else {
+    # check regular alarms
+
+    for my $stdalarm (1..3) {
+      if($alarm{$stdalarm} eq $hhmm) {
+	if($table[$stdalarm][$dow]{color} eq $alarm{active}) {
+	  # BING BING BING ! It is alarm time
+          trigger("STANDARD ALARM $stdalarm -- $hhmmss");
+	}
+      }
+    }
+
+  } # else checking regular alarms
+
+  $row = 0;
+  # top row is day reset buttons
+  for $col (0..6) {
+    $Day = ucfirst($dow[$col]);
+
+    my $label = $Day;
+    my $color = $table[$row][$col]{color};
+
+    if($dow == $col) {
+      my $dom = sprintf('%d of %s', $time[3], $moy[$time[4]]);
+      $label = "$dom\n$hhmm";
+    }
+
+    my $l = $btable[$row][$col];
+    $l->configure(-text => $label,
+		  -background => $color,
+		  -activebackground => $color);
+  }
+
+  $t->update;
+} # end &everyminute 
+
+sub trigger {
+  my $message = shift;
+  print $message . "\n";
+  if(!fork()) {
+    setpgrp();
+
+    # no pid, in child process 
+    exec($alarmtool) or
+	die "$0: Alarm tool failure: $alarmtool; $!\n";
+  }
+} # end &trigger 
+
+sub boring_init {
+  # initial %alarm
+  $alarm{1}            = '06:45';
+  $alarm{2}            = '08:00';
+  $alarm{3}            = '09:30';
+  $alarm{active}       = 'pink';
+  $alarm{inactive}     = 'white';
+  $alarm{daycontrol}   = 'lightblue';
+  $alarm{buttonwidth}  = 6;
+  $alarm{buttonheight} = 3;
+
+  for my $d (0..6) {
+    my $Day = ucfirst($dow[$d]);
+    $alarm{$Day} = sprintf('10:%02d', 7+$d*8);
+  }
+
+  # initialize @table
+
+  $row = 0;
+  # top row is day reset buttons
+  for $col (0..6) {
+    my $Day = ucfirst($dow[$col]);
+
+    $table[$row][$col] = {
+	     type => 'day',
+	     label => $Day,
+	     day  => $Day,
+	     color => $alarm{daycontrol},
+	  };
+  }
+
+  # next come three rows of standard buttons
+  for $row (1..3) {
+    for $col (0..6) {
+      my $Day = ucfirst($dow[$col]);
+      my $at = $alarm{$row};
+      my $alarm = "Alarm $row\n$at";
+
+      $table[$row][$col] = {
+	       type => 'alarm',
+	       label => $alarm,
+	       day  => $Day,
+	       color => $alarm{inactive},
+	    };
+    }
+  }
+
+  # finally one row of specials
+  $row = 4;
+  for $col (0..6) {
+    my $Day = ucfirst($dow[$col]);
+    my $at = $alarm{$Day};
+    my $alarm = "$at on\n$Day";
+
+    $table[$row][$col] = {
+	     type => 'alarm',
+	     label => $alarm,
+	     day  => $Day,
+	     color => $alarm{inactive},
+	  };
+  }
+} # end &boring_init 
+
+__END__
+# find lines longer than 65 chars (width of terminal on
+# pocketCHIP)
+/................................................................../
+

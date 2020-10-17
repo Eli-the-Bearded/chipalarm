@@ -1,0 +1,293 @@
+#!/usr/bin/perl
+# This tool plays a sound repeatedly up to a particular count
+# of plays or a particular length of time playing. Added to
+# make that interesting, it listens on a GPIO pin for at least
+# 10 counts of the pin being high and 10 counts of the pin
+# being low, checked every 1/100th of a second. The idea behind
+# the mix of high and low is to allow a switch to turn off the
+# sound without caring if the switch is a normally-open or
+# normally-closed variety. One will result in a high count of
+# high readings, and the other a high count of low readings,
+# but both are needed to be done.
+
+use vars qw( $gpiodir $gpiosubdir $gpiolabel $gpiobase $gpionum
+             $offset $gpio_N $gpio_pd $readvec $found $value
+	     $timeout $elapsed @gpiopindir $gpioedge
+             $pid $maxplays $sound $playtool $group $pause
+	     $have_export );
+
+# we will quit automatically after (about) this much time
+$timeout = 60; # seconds
+
+# maximum number of plays in alarm subprocess (assuming a short sound)
+$maxplays = int( 0.5 * $timeout );
+
+# sound file to play
+# $sound = '/home/chip/Documents/sunvox/instruments/drums/cymbal/crash.wav';
+# /usr/lib/libreoffice/share/gallery/sounds/curve.wav on Ubuntu 16.04
+$sound = '/home/chip/Documents/curve.wav';
+
+# tool to play sounds
+$playtool = '/usr/bin/aplay';
+
+# play a group of this many
+$group = 2;
+
+# and then pause for this long seconds
+$pause = 0.5;
+
+# look for subdirs here
+$gpiodir = '/sys/class/gpio';
+
+# in those subdirs, look for a label file with this name
+$gpiolabel = 'pcf8574a';
+
+# then set $gpiosubdir with the name found
+$gpiosubdir = undef;
+
+# then read $gpiosubdir/base for lowest numbered GPIO pin
+$gpiobase = undef;
+
+# then read $gpiosubdir/ngpio for number of pins
+$gpionum = 0;
+
+# Docs say you can set to 'rising', 'falling', 'both' for some 
+# control over when events trigger. I'm not sure it works. If
+# left 'undef', it won't be changed.
+$gpioedge = undef;
+
+# The number we add to gpiobase for our pin to use.
+# On my pocketCHIP, base is 408 and 410 corresponds to the
+# mounting hole labeled "GPIO 1", while the 415 is the 
+# "GPIO 6", the last of the GPIO holes.
+$offset = 7;
+
+# perl subroutine prototype for clean use without parens.
+sub THEEND(;$);
+$SIG{INT}  = 'main::THEEND';
+$SIG{TERM} = 'main::THEEND';
+$SIG{HUP}  = 'main::THEEND';
+
+setpgrp();
+
+if(opendir(GD, $gpiodir)) {
+  my $subdir;
+  while(defined($subdir = readdir(GD))) {
+    next if $subdir =~ /^[.]/;
+
+    $subdir = "$gpiodir/$subdir";
+    if(-f "$subdir/label") {
+      if(open(L, "<", "$subdir/label")) {
+        $_ = <L>;
+	close L;
+
+	s/\s+//g;
+	if ($gpiolabel eq $_) {
+	  $gpiosubdir = $subdir;
+	  
+	  # no need to loop further
+	  last; 
+	}
+      }
+    } # if label file exists
+  } # while looking for subdirs
+  closedir(GD);
+
+} # if open gpio dir
+
+if(defined($gpiosubdir)) {
+
+  if(-f "$gpiosubdir/base") {
+    if(open(B, "<", "$gpiosubdir/base")) {
+      $_ = <B>;
+      close B;
+
+      s/\s+//g;
+      if (/^(\d+)$/) {
+	$gpiobase = $1; # untainted
+      }
+    }
+  } # if base file exists
+
+  if(-f "$gpiosubdir/ngpio") {
+    if(open(N, "<", "$gpiosubdir/ngpio")) {
+      $_ = <N>;
+      close N;
+
+      s/\s+//g;
+      if (/^(\d+)$/) {
+	$gpionum = $1; # untainted
+      }
+    }
+  } # if ngpio file exists
+}
+
+if(!$gpiobase or !$gpionum) {
+  THEEND "$0: no suitable GPIO chip found.\n";
+}
+
+if($gpionum < $offset) {
+  THEEND "$0: config issue: offset $offset > ngpio $gpionum\n";
+}
+$gpio_N = sprintf('%d', $gpiobase + $offset);
+$gpio_pd = "$gpiodir/gpio$gpio_N";
+
+print "Base gpio is $gpiobase, offset $offset = $gpio_N\n";
+
+# make sure no pin dir exists for that
+if(-d $gpio_pd) {
+  THEEND "$0: GPIO $gpio_N is already exported\n";
+}
+
+if(!open(EXPORT, '>', "$gpiodir/export")) {
+  THEEND "$0: cannot start GPIO export (not right group?): $!\n";
+}
+$_ = syswrite(EXPORT, $gpio_N);
+close EXPORT;
+
+if(!defined($_) or $_ != length($gpio_N)) {
+  THEEND "$0: unable to export GPIO $gpio_N: $!\n";
+}
+
+$have_export = $gpio_N;
+
+# now we should have a new subdir, $gpiodir/gpio$gpio_N
+if(! -d $gpio_pd) {
+  THEEND "$0: GPIO $gpio_N did not export as expected\n";
+}
+
+$gpiopindir[$offset] = $gpio_pd;
+
+if($gpioedge) {
+  print "Setting edge to $gpioedge\n";
+  if(!open(GPEDGE, '>', "$gpiopindir[$offset]/edge")) {
+    THEEND "$0: cannot set signal edge " .
+         "$gpiopindir[$offset]/value: $!\n";
+  }
+  $_ = syswrite(GPEDGE, 'falling');
+  close GPEDGE;
+  if($_ != length('falling')) {
+    THEEND "$0: failed to set signal edge " .
+         "$gpiopindir[$offset]/value: $!\n";
+  }
+} else {
+  print "Not setting edge\n";
+}
+
+if(!open(GPVALUE, '<', "$gpiopindir[$offset]/value")) {
+  THEEND "$0: cannot read from $gpiopindir[$offset]/value: $!\n";
+}
+
+
+# from perldoc -f select
+vec($readvec, fileno(GPVALUE),  1) = 1;
+$elapsed = 0;
+
+$pid = fork();
+if(!$pid) {
+  # the child process plays sounds instead of listening for GPIO stuff
+  $have_export = 0;
+  while($elapsed < $maxplays) {
+    system("$playtool $sound");
+    $elapsed ++;
+    if(($elapsed % $group) == 0) {
+      select(undef, undef, undef, $pause);
+    }
+  }
+  exit;
+}
+
+# state is 0 or 1 normally, this is an int unlikely to be
+# outputted by the kernel
+my $laststate = 0xdeadbeef;
+my @statecount;
+while($elapsed < $timeout) {
+
+  # found is number of file descriptors ready, since we only are
+  # interested in one, it will be 1 ready or 0 (timeout).
+  # select args are read vector, write vector, and "exceptions"
+  # vector plus a timeout (floating point, in seconds)
+  $found = select($readvec, undef, $readvec, 0.01);
+
+  # close enough
+  $elapsed += 0.01;
+
+  # I'm not sure if "found" actually works here, we'll use it
+  # just for an output diagnostic.
+
+
+  # regular read() / <filehandle> is not supported for select()
+  # filehandles.
+  $_ = sysread(GPVALUE, $value, 256);
+
+  if($_ == 0) { 
+    warn "$0: read from gpio value failed $found\n";
+  } else {
+    chomp $value;
+    if ($laststate != $value) {
+      $laststate = $value;
+    }
+    $statecount[$value] ++;
+  }
+
+  # rewind the filehandle (note "sys" version again)
+  $_ = sysseek(GPVALUE, 0, 0);
+  if(!defined($_)) {
+    # I seriously expect that this error will never occur
+    # but if someone unexported our GPIO pin behind our back,
+    # maybe.
+    THEEND "$0: huh. the seek failed: $!\n";
+  }
+
+  if($statecount[0] > 10 and $statecount[1] > 10) {
+    # done enough
+    last;
+  }
+}
+
+print "DONE!\n";
+
+sub THEEND (;$) {
+  my $message = shift;
+  my $rc = 0;
+  if ($message) {
+    if($message =~ /^[A-Z]+$/) {
+      # called as a signal handler
+      print STDERR "$0: got SIG$message aborting\n";
+    } else {
+      # the "die" substitute usage
+      print STDERR $message;
+    }
+    $rc = 1;
+  }
+
+  # do we have a child process?
+  if($pid) {
+    kill 1, $pid;
+  }
+
+  # do we need to clean other things up?
+  if($have_export) {
+    print "Now unexporting $gpio_N.\n";
+
+    if(!open(UNEXPORT, '>', "$gpiodir/unexport")) {
+      warn "$0: cannot stop GPIO export: $!\n";
+    }
+    $_ = syswrite(UNEXPORT, $gpio_N);
+    close UNEXPORT;
+
+    if(!defined($_) or $_ != length($gpio_N)) {
+      warn "$0: unable to UNexport GPIO $gpio_N: $!\n";
+    }
+  }
+
+  exit $rc;
+}
+
+# call our clean up fucntion to clean up...
+THEEND();
+
+__END__
+# find lines longer than 65 chars (width of terminal on
+# pocketCHIP)
+/................................................................../

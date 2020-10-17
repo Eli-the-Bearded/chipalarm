@@ -1,0 +1,6 @@
+#!/bin/sh
+# just to sample the sound
+crash=/home/chip/Documents/sunvox/instruments/drums/cymbal/crash.wav
+curve=/home/chip/Documents/curve.wav
+/usr/bin/aplay $curve
+
