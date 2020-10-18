@@ -2,7 +2,9 @@ chipalarm
 =========
 
 A GUI alarm tool for the now defunct Next Thing Co "pocketCHIP"
-computer.
+computer. Blog post about this project:
+
+https://qaz.wtf/qz/blosxom/2020/10/17/alarm
 
 About the Platform
 ------------------
@@ -41,12 +43,26 @@ alarm. It let me quickly turn on or off three different alarm
 settings. I liked that, but wanted a way to set a week of those
 at once and to have an occasional override.
 
-This reads (or creates if it doesn't find one) a .chipalarmrc
+This reads (or creates if it doesn't find one) a `.chipalarmrc`
 file with three standard alarm times and one per-day-of-week
 alarm time. While running, every thing on the screen is a button.
 Click an alarm to toggle that, click the day of week to clear all
-alarms on that day.  Push one GUI button over and over enough and
-the program quits.
+alarms on that day.  Push one GUI button over and over enough 
+(I think it is set at five times) and the program quits.
+
+The program saves state automatically if there have been any 
+changes in what alarms are set. The wfites are delayed until the
+next minute, trying to group them. Changing the times is done
+by editing the rc file and either restarting the program or
+sending it a `HUP` signal with `kill`.
+
+```
+vi .chipalarmrc
+kill -HUP %1
+```
+
+Make changes to the alarm times and reread the file before
+changing which alarms are set to avoid the race condition
 
 When an alarm fires, it starts another program (once) and stops
 caring. The other program is responsible for sounding the alarm
@@ -65,7 +81,7 @@ decides that's enough and kills the sound playback and quits.
 I had a lot of trouble finding documentation (at first) for how
 to use GPIO. Everything I encountered just described how the
 Python library for the Raspberry Pi GPIO worked, not how GPIO
-actually works in Liniu. Thus I documented my code in some
+actually works in Linux. Thus I documented my code in some
 detail. The general way it works is find the device directory in 
 `/sys/class/gpio` for your driver card, write to some files there
 to enable GPIO, then read from some files there to get state.
@@ -79,6 +95,6 @@ different anyway.
 History
 -------
 
-I wrote the first version of this in September 2016. I have RCS
+I wrote the first version of this in mid-2016. I have RCS
 files with the dates and changes, but I did not convert that
-change history to git, as no one else carse.
+change history to git, as no one else cares.
